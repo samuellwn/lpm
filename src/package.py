@@ -23,12 +23,36 @@
 
 import db
 
+class Environment:
+    class Variable:
+        def __init__(name, value, mode sep):
+            self.name = name
+            self.value = value
+            self.mode = mode
+            self.separator = sep
+
+    def __init__(self):
+        self.variables = []
+
+    def add(name, value, mode, sep):
+        self.variables.append(Variable(name, value, mode, sep))
+
+    def remove(name, value, mode, sep):
+        self.variables.append(Variable(name, value, mode, sep))
+
 class Package:
     def __init__(self, conf, packageDb, name, vers):
         self.db = packageDb
         self.name = name
         self.version = vers
         self.config = conf
+
+        self.buildEnvCache = Environment()
+        self.runEnvCache = Environment()
+        self.depCache = []
+        self.bindirCache = []
+        self.libdirCache = []
+        self.binaryCache = []
 
     def initialize(self):
         packageDir = Path(self.config.locations.packageDir)
@@ -60,7 +84,43 @@ class Package:
     def envAdd(self, variable, value, mode, sep, build):
         self.db.addPackageEnv(self.name, self.version, variable, value,
                               mode, sep, build)
-        
+        if build:
+            self.buildEnvCache.add(self.name, self,version, variable,
+                                   value, mode, sep)
+        else:
+            self.runEnvCache.add(self.name, self,version, variable,
+                                 value, mode, sep)
+
     def envRemove(self, variable, value, build):
         self.db.removePackageEnv(self.name, self.version, variable,
                                  value, build)
+        if build:
+            self.buildEnvCache.remove(self.name, self,version, variable,
+                                      value, mode, sep)
+        else:
+            self.runEnvCache.remove(self.name, self,version, variable,
+                                    value, mode, sep)
+
+    def addLibdir(self, dir):
+        self.db.addPackageLibdir(self.name, self.version, dir)
+        self.libdirCache.append(dir)
+
+    def removeLibdir(self, dir):
+        self.db.removePackageLibdir(self.name, self.version, dir)
+        self.libdirCache.remove(dir)
+
+    def addBindir(self, dir):
+        self.db.addPackageBindir(self.name, self.version, dir)
+        self.bindirCache.append(dir)
+
+    def removeBindir(self, dir):
+        self.db.removePackageBindir(self.name, self.version, dir)
+        self.bindirCache.remove(dir)
+
+    def addBinary(self, binary):
+        self.db.addPackageBinary(self.name, self.version, binary)
+        self.binaryCache.append(binary)
+
+    def removeBinary(self, binary):
+        self.db.removePackageBinary(self.name, self.version, binary)
+        self.binaryCache.remove(binary)
