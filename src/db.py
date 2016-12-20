@@ -25,8 +25,8 @@
 from pathlib import Path
 import logging
 
-import package
-import version
+import package as p
+import version as v
 
 log = logger.getLogger(__name__)
 
@@ -48,9 +48,9 @@ class Deps(list):
 # packages. Sqlite3 string format is like so:
 #     <self.name>;<str(version)>
 class SPackage:
-    def __init__(self, name, vers):
+    def __init__(self, name, version):
         self.name = name
-        self.version = vers
+        self.version = version
 
     def __conform__(self, protocol):
         if protocol is sqlite3.PrepareProtocol:
@@ -86,7 +86,7 @@ def sqlite3ConvertDeps(s):
 
 def sqlite3ConvertPackage(s):
     name, vers = s.decode().split(';')
-    return SPackage(name, version.Version(vers))
+    return SPackage(name, v.Version(vers))
 
 def sqlite3ConvertPath(s):
     return Path(s.decode())
@@ -109,6 +109,7 @@ def sqlite3Connect(dbFile):
 
 def openSqlite3Db(conf):
     conn = sqlite3Connect(conf.packageDb.dbFile)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     cursor.execute('select version from format_version;')
@@ -138,143 +139,166 @@ class Sqlite3V1:
         self.conn = conn
         self.cursor = cursor
 
-    def createPackage(self, name, vers):
+    def createPackage(self, package):
         self.cursor.execute('insert into packages values (%s, %s);',
-                            SPackage(name, vers), 'unitialized')
+                            package, 'unitialized')
 
         self.cursor.commit()
 
-    def deletePackage(self, name, vers):
-        tableName = name + vers.safeStr()
-
+    def deletePackage(self, package):
         # sqlite3 will automatically clean the environment and path
         # tables for us.
         self.cursor.execute('delete from packages where package = %s;',
-                            SPackage(name, vers))
+                            package)
 
         self.cursor.commit()
 
     # status is the packages current install status. One of
     # 'uninitialized', 'installing', or 'installed'.
-    def setPackageStatus(self, name, vers, status):
-        pack = SPackage(name, vers)
+    def setPackageStatus(self, package, status):
+        self.cursor.execute('''
+            update table packages set status = %s
+            where package = %s;''', status, package)
 
-        self.cursor.execute('update table packages set status = %s;',
-                            status)
-
-    def packageExists(self, name, vers):
+    def packageExists(self, package):
         # Let's make sure we have record of the package
-        pack = SPackage(name, vers)
-        self.cursor.execute('select from packages where package = %s;',
-                            pack)
+        self.cursor.execute('select * from packages where package = %s;',
+                            package)
 
         if self.cursor.fetchone() is None:
             return False
         else:
             return True
 
-    def addPackageEnv(self, pName, pVersion, varName, varValue,
+    def addPackageEnv(self, package, varName, varValue,
                       varMode, varSep, build):
         if build:
             table = 'build_env'
         else:
             table = 'run_env'
 
-        pack = SPackage(pName, pVersion)
-
         self.cursor.execute('''
             insert into %s (package, variable, value, mode, sep)
-            values (%s, %s, %s, %s, %s);''', table, pack, varName,
+            values (%s, %s, %s, %s, %s);''', table, package, varName,
                             varValue, varMode, varSep)
 
         self.cursor.commit()
 
-    def removePackageEnv(self, pName, pVersion, varName, varValue,
+    def removePackageEnv(self, package, varName, varValue,
                          build):
         if build:
             table =  'build_env'
         else:
             table = 'run_env'
 
-        pack = SPackage(pName, pVersion)
-
         self.cursor.execute('''
             delete from %s where
             package = %s and variable = %s and value = %s;''',
-                            table, varName, varValue)
+                            table, package, varName, varValue)
 
         self.cursor.commit()
 
-    def addPackageDep(self, pName, pVersion, depName, depVersion):
-        pack = SPackage(pName, pVersion)
-        dep = SPackage(depName, depVersion)
+    def getPackageEnv(self, package, varName=None, build=False):
+        if build:
+            table = 'build_env'
+        else:
+            table = 'run_env'
+
+        if varName is None:
+            self.cursor.execute('''
+                select (variable, value, mode, sep) from %s
+                where package = %s;''', table, package)
+
+        else:
+            self.cursor.execute('''
+                select (package, variable, value, mode sep) from %s
+                where package = %s and variable = %s''',
+                                table, package, varName)
+
+        return self.cursor.fetchall()
+            
+
+    def addPackageDep(self, package, dep):
 
         self.cursor.execute('''
             insert into dependancies (package, dependancy)
-            values (%s, %s);''', pack, dep)
+            values (%s, %s);''', package, dep)
 
         self.cursor.commit()
 
-    def removePackageDep(self, pName, pVersion, depName, depVersion):
-        pack = SPackage(pName, pVersion)
-        dep = SPackage(depName, depVersion)
-
+    def removePackageDep(self, package, dep):
         self.cursor.execute('''
             delete from dependancies where
-            package = %s and dependancy = %s;''', pack, dep)
+            package = %s and dependancy = %s;''', package, dep)
 
         self.cursor.commit()
 
-    def addPackageBindir(self, name, vers, dir):
-        pack = SPackage(name, vers)
+    def getPackageDeps(self, package):
+        self.cursor.execute('''
+            select (dependancy) from dependancies
+            where package = %s;''', package)
 
+        return self.cursor.fetchall()
+
+    def addPackageBindir(self, package, dir):
         self.cursor.execute('''
             insert into bindirs (package, dir)
-            values (%s, %s);''', pack, dir)
+            values (%s, %s);''', package, dir)
 
         self.cursor.execute()
 
-    def removePackageBindir(self, name, vers, dir):
-        pack = SPackage(name, vers)
-
+    def removePackageBindir(self, package, dir):
         self.cursor.execute('''
             delete from bindirs where
-            package = %s and dir = %s;''', pack, dir)
+            package = %s and dir = %s;''', package, dir)
 
         self.cursor.commit()
 
-    def addPackageLibdir(self, name, vers, dir):
-        pack = SPackage(name, vers)
+    def getPackageBindirs(self, package):
+        self.cursor.execute('''
+            select (dir) from bindirs
+            where package = %s;''', package)
 
+        return self.cursor.fetchall()
+
+    def addPackageLibdir(self, package, dir):
         self.cursor.execute('''
             insert into libdirs (package, dir)
-            values (%s, %s);''', pack, dir)
+            values (%s, %s);''', package, dir)
 
         self.cursor.execute()
 
-    def removePackageLibdir(self, name, vers, dir):
-        pack = SPackage(name, vers)
-
+    def removePackageLibdir(self, package, dir):
         self.cursor.execute('''
             delete from libdirs where
-            package = %s and dir = %s;''', pack, dir)
+            package = %s and dir = %s;''', package, dir)
 
         self.cursor.commit()
 
-    def addPackageBinary(self, name, vers, binary):
-        pack = SPackage(name, vers)
+    def getPackageLibdirs(self, package):
+        self.cursor.execute('''
+            select (dir) from libdirs
+            where package = %s;''', package)
 
+        return self.cursor.fetchall()
+
+    def addPackageBinary(self, package, binary):
         self.cursor.execute('''
             insert into binaries (package binary)
-            values (%s, %s);''', pack, binary)
+            values (%s, %s);''', package, binary)
 
         self.cursor.commit()
 
-    def removePackageBinary(self, name, vers, binary):
-        pack = SPackage(name, vers)
-
+    def removePackageBinary(self, package, binary):
         self.cursor.execute('''
             delete from binaries where
-            package = %s and binary = %s;''', pack, binary)
+            package = %s and binary = %s;''', package, binary)
 
         self.cursor.commit()
+
+    def getPackageBinaries(self, package):
+        self.cursor.execute('''
+            select (binary) from binaries
+            where package = %s;''', package)
+
+        return self.cursor.fetchall()

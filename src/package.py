@@ -25,20 +25,91 @@ import db
 
 class Environment:
     class Variable:
-        def __init__(name, value, mode sep):
-            self.name = name
-            self.value = value
+        def __init__(self, values=[], mode="append", sep=None):
             self.mode = mode
-            self.separator = sep
 
-    def __init__(self):
-        self.variables = []
+            if mode == "append" or mode == "prepend":
+                self.values = values
+                if sep is None:
+                    self.separator = ":"
+                else:
+                    self.separator = sep
+            elif mode == "overwrite":
+                self.value = value
+            else:
+                # blow up
 
-    def add(name, value, mode, sep):
-        self.variables.append(Variable(name, value, mode, sep))
+        def addValue(self, value):
+            if self.mode == "append":
+                self.values.append(value)
+            elif self.mode == "prepend":
+                self.values.insert(0, value)
+            elif self.mode == "overwrite":
+                self.value = value
 
-    def remove(name, value, mode, sep):
-        self.variables.append(Variable(name, value, mode, sep))
+        def setValue(self, value):
+            if self.mode == "overwrite":
+                self.addValue(value):
+            else:
+                # blow up
+
+        def get(self):
+            if self.mode == "overwrite":
+                return self.value
+            else:
+                result = ""
+                for value in self.values:
+                    result += value + self.sep
+                return result[:-1] # strip the trailing separator
+
+        def removeValue(self, value):
+            self.values.remove(value)
+            
+
+    def __init__(self, getter, setter, remover):
+        self.variables = {}
+        self.getter = getter
+        self.setter = setter
+        self.remover = remover
+
+    def _cache(self, name):
+        if name not in self.variables:
+            var = self.getter(name)
+            if var is not None:
+                self.variables[name] 
+
+    def get(self, name):
+        self._cache(name):
+        return self.variables[name].get()
+
+    def asDict(self):
+        result = {}
+
+        for name in self.variables:
+            result[name] = self.variables[name].get()
+
+        return result
+
+    def addValue(self, name, value):
+        self._cache(name)
+        self.setter(name, value, self.variable[name].mode,
+                    self.variable[name].separator)
+        self.variable[name].addValue(value)
+
+    def removeValue(self, name, value):
+        self._cache(name)
+        self.remover(name, value)
+        self.variable[name].remove(value)
+
+    def addVariable(self, name, values=[], mode="append", sep=None):
+        self.setter(name, values, mode, sep)
+        self.variable[name] = Variable(values, mode, sep)
+
+    def removeVariable(self, name):
+        for value in self.variables[name].values:
+            self.remover(name, value)
+
+        del self.variables[name]
 
 class Package:
     def __init__(self, conf, packageDb, name, vers):
@@ -47,12 +118,18 @@ class Package:
         self.version = vers
         self.config = conf
 
-        self.buildEnvCache = Environment()
-        self.runEnvCache = Environment()
+        self.buildEnv = Environment()
+        self.runEnv = Environment()
         self.depCache = []
         self.bindirCache = []
         self.libdirCache = []
         self.binaryCache = []
+
+    def _buildEnvSetter(self, varName, varValue, varMode, varSep):
+        self.db.addPackageEnv(self.name, self.version, varName,
+                              varValue, varMode, varSep, build=True)
+
+    def 
 
     def initialize(self):
         packageDir = Path(self.config.locations.packageDir)
@@ -71,35 +148,6 @@ class Package:
     def removeDep(self, dep):
         self.db.removePackageDep(self.name, self.version,
                                  dep.name, dep.version)
-
-    def envAddAppend(self, variable, value, sep, build):
-        self.envAdd(variable, value, 'append', sep, build)
-
-    def envAddPrepend(self, variable, value, sep, build):
-        self.envAdd(variable, value, 'prepend', sep, build)
-
-    def envAddSet(self, variable, value, build):
-        self.envAdd(variable, value, 'overwrite', None, build)
-
-    def envAdd(self, variable, value, mode, sep, build):
-        self.db.addPackageEnv(self.name, self.version, variable, value,
-                              mode, sep, build)
-        if build:
-            self.buildEnvCache.add(self.name, self,version, variable,
-                                   value, mode, sep)
-        else:
-            self.runEnvCache.add(self.name, self,version, variable,
-                                 value, mode, sep)
-
-    def envRemove(self, variable, value, build):
-        self.db.removePackageEnv(self.name, self.version, variable,
-                                 value, build)
-        if build:
-            self.buildEnvCache.remove(self.name, self,version, variable,
-                                      value, mode, sep)
-        else:
-            self.runEnvCache.remove(self.name, self,version, variable,
-                                    value, mode, sep)
 
     def addLibdir(self, dir):
         self.db.addPackageLibdir(self.name, self.version, dir)
@@ -124,3 +172,6 @@ class Package:
     def removeBinary(self, binary):
         self.db.removePackageBinary(self.name, self.version, binary)
         self.binaryCache.remove(binary)
+
+    def getRunEnv(self):
+        
